@@ -7,6 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import UploadAudioPage from "../upload/page";
 import Navbar from '@/components/Navbar';
 import AudioPlayer from "@/components/Audioplayer";
+import ReactDOM from 'react-dom/client';
 
 const defaultPosition = {
   lng: 77.5946,
@@ -29,6 +30,7 @@ export default function AudioMap() {
     time: '',
     recipientUsernames: [],
   });
+  const audioRoots = useRef({}); // Add this ref to store audio player roots
 
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -105,9 +107,11 @@ export default function AudioMap() {
   useEffect(() => {
     if (!map.current) return;
 
-    // Remove existing markers
+    // Remove existing markers and cleanup audio roots
     const markers = document.getElementsByClassName('maplibregl-marker');
     Array.from(markers).forEach(marker => marker.remove());
+    Object.values(audioRoots.current).forEach(root => root.unmount());
+    audioRoots.current = {};
 
     // Add new markers
     validAudioFiles.forEach((file) => {
@@ -131,17 +135,29 @@ export default function AudioMap() {
             Range: ${file.range}m<br/>
             Hidden Until: ${new Date(file.hidden_until).toLocaleString()}<br/>
             Created At: ${new Date(file.created_at).toLocaleString()}<br/><br/>
-            ${isAccessible ? 
-              `<div id="audio-player-${file._id}"></div>` : 
+            ${isAccessible ? `<div id="player-${file._id}"></div>` : 
               '<span class="locked-text">🔒 Locked</span>'
             }
           </div>
         `);
 
-      new maplibregl.Marker(markerElement)
+      const marker = new maplibregl.Marker(markerElement)
         .setLngLat([file.location.coordinates[0], file.location.coordinates[1]])
         .setPopup(popup)
         .addTo(map.current);
+
+      // Add event listener for popup open
+      marker.getPopup().on('open', () => {
+        if (isAccessible) {
+          const playerContainer = document.getElementById(`player-${file._id}`);
+          if (playerContainer) {
+            if (!audioRoots.current[file._id]) {
+              audioRoots.current[file._id] = ReactDOM.createRoot(playerContainer);
+            }
+            audioRoots.current[file._id].render(<AudioPlayer audioId={file._id} />);
+          }
+        }
+      });
     });
   }, [validAudioFiles]);
 
@@ -202,43 +218,6 @@ export default function AudioMap() {
       console.error("❌ Error fetching audio files:", err);
     }
   }
-
-  const handlePlay = async (audioId) => {
-    const token = localStorage.getItem("authToken");
-    try {
-      const response = await axios.get(`https://echo-trails-backend.vercel.app/audio/files/${audioId}/download`, {
-        responseType: 'blob',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const audioBlob = response.data;
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      audio.play();
-    } catch (err) {
-      console.error("❌ Audio playback error:", err);
-      if (err.response) {
-        const status = err.response.status;
-
-        const reader = new FileReader();
-        reader.onload = () => {
-          try {
-            const json = JSON.parse(reader.result);
-            console.error("📜 Server error message:", json.detail);
-
-            if (status === 403) alert("🔒 Not authorized or still locked.");
-            else if (status === 404) alert("🚫 Audio not found.");
-            else alert("⚠️ Something went wrong.");
-          } catch (e) {
-            alert("⚠️ Unexpected error while reading server response.");
-          }
-        };
-        reader.readAsText(err.response.data);
-      } else {
-        alert("⚠️ Network or server error.");
-      }
-    }
-  };
 
   const styles = {
     container: {
@@ -348,8 +327,17 @@ export default function AudioMap() {
         .custom-popup .maplibregl-popup-content {
           background: #000;
           color: white;
-          padding: 12px;
+          padding: 16px;
           border-radius: 8px;
+          min-width: 250px;
+        }
+        
+        .custom-popup .maplibregl-popup-close-button {
+          color: white;
+          font-size: 16px;
+          padding: 5px;
+          right: 5px;
+          top: 5px;
         }
         .popup-content {
           min-width: 200px;
