@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
-import { MapPin, Upload, Users, Clock, Music, Calendar } from 'lucide-react';
+import { MapPin, Upload, Users, Clock, Music, Calendar, Mic, Square } from 'lucide-react';
 import Navbar from '../../components/Navbar';
 
 const AudioUploadForm = ({ onLocationSelect, formData, setFormData }) => {
@@ -16,6 +16,10 @@ const AudioUploadForm = ({ onLocationSelect, formData, setFormData }) => {
   const [longitude, setLongitude] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const recordingTimer = useRef(null);
   const router = useRouter();
 
   // Use formData values instead of local state
@@ -30,13 +34,16 @@ const AudioUploadForm = ({ onLocationSelect, formData, setFormData }) => {
     const fetchCurrentUserAndFollowing = async () => {
       const token = localStorage.getItem('authToken');
       const username = localStorage.getItem('username');
+      const userId = localStorage.getItem('userId');
       const headers = { Authorization: `Bearer ${token}` };
 
       try {
         setCurrentUsername(username);
 
         const usersRes = await axios.get('https://echo-trails-backend.vercel.app/users/following', { headers });
-        setUsers(usersRes.data);
+        // Add current user to the beginning of users list
+        const currentUser = { _id: userId, username: username };
+        setUsers([currentUser, ...usersRes.data]);
 
         // Check for selected location from map page
         const storedLocation = localStorage.getItem('selectedLocation');
@@ -166,6 +173,49 @@ const AudioUploadForm = ({ onLocationSelect, formData, setFormData }) => {
     if (droppedFile?.type.startsWith('audio/')) {
       updateFormData('file', droppedFile);
     }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/mp3' });
+        const audioFile = new File([blob], 'recorded-audio.mp3', { type: 'audio/mp3' });
+        updateFormData('file', audioFile);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      setMediaRecorder(recorder);
+      recorder.start();
+      setIsRecording(true);
+      
+      // Start timer
+      setRecordingTime(0);
+      recordingTimer.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      alert('Could not access microphone. Please check permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+      setIsRecording(false);
+      clearInterval(recordingTimer.current);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const styles = {
@@ -355,6 +405,29 @@ const AudioUploadForm = ({ onLocationSelect, formData, setFormData }) => {
     },
   };
 
+  const recordingStyles = {
+    recordButton: {
+      padding: '12px',
+      borderRadius: '50%',
+      backgroundColor: isRecording ? '#ff4d4d' : 'rgba(255, 255, 255, 0.05)',
+      border: '1px solid',
+      borderColor: isRecording ? '#ff4d4d' : '#00ff9d',
+      color: isRecording ? '#ffffff' : '#00ff9d',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.2s ease',
+    },
+    recordingIndicator: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      color: '#ff4d4d',
+      fontSize: '14px',
+    },
+  };
+
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const toggleDropdown = () => {
@@ -377,13 +450,28 @@ const AudioUploadForm = ({ onLocationSelect, formData, setFormData }) => {
               <Music size={20} />
               Audio Details
             </div>
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+              <button
+                type="button"
+                onClick={isRecording ? stopRecording : startRecording}
+                style={recordingStyles.recordButton}
+              >
+                {isRecording ? <Square size={20} /> : <Mic size={20} />}
+              </button>
+              {isRecording && (
+                <div style={recordingStyles.recordingIndicator}>
+                  <span>Recording</span>
+                  <span>{formatTime(recordingTime)}</span>
+                </div>
+              )}
+            </div>
             <div
               style={styles.fileUpload}
               onDragEnter={handleDrag}
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
-              onClick={() => document.getElementById('file-upload').click()}
+              onClick={() => !isRecording && document.getElementById('file-upload').click()}
             >
               <Upload size={32} style={{ color: '#00ff9d', marginBottom: '12px' }} />
               <div style={{ marginBottom: '8px', color: '#fff' }}>
@@ -507,9 +595,10 @@ const AudioUploadForm = ({ onLocationSelect, formData, setFormData }) => {
                           backgroundColor: recipientUsernames.includes(user.username)
                             ? 'rgba(0, 255, 157, 0.1)'
                             : 'transparent',
+                          fontWeight: user.username === currentUsername ? '600' : 'normal', // Bold for current user
                         }}
                       >
-                        {user.username}
+                        {user.username === currentUsername ? 'Me' : user.username}
                         {recipientUsernames.includes(user.username) && (
                           <span style={{ color: '#00ff9d', marginLeft: '8px' }}>✓</span>
                         )}
