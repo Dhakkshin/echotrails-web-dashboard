@@ -180,7 +180,7 @@ export default function HomePage() {
                     Available for Android. (iOS users, you aint getting it😏)
                 </p>
                 <a 
-                    href="https://expo.dev/accounts/pream14/projects/bolt-expo-nativewind/builds/e0130004-b50f-46c2-9639-9e7a7cd7677a"
+                    href="https://expo.dev/accounts/pream14/projects/bolt-expo-nativewind/builds/a5dc6978-7485-4f9a-87c6-dcfa1f9e41bc"
                     target="_blank"
                     rel="noopener noreferrer"
                     style={styles.downloadLink}
