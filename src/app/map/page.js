@@ -1,20 +1,18 @@
-
 'use client';
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import axios from "axios";
-import dynamic from "next/dynamic";
-import "leaflet/dist/leaflet.css";
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import UploadAudioPage from "../upload/page";
 import Navbar from '@/components/Navbar';
 import AudioPlayer from "@/components/Audioplayer";
 
-const MapContainer = dynamic(() => import("react-leaflet").then(mod => mod.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import("react-leaflet").then(mod => mod.TileLayer), { ssr: false });
-const Marker = dynamic(() => import("react-leaflet").then(mod => mod.Marker), { ssr: false });
-const Popup = dynamic(() => import("react-leaflet").then(mod => mod.Popup), { ssr: false });
-
-const defaultPosition = [12.9716, 77.5946];
+const defaultPosition = {
+  lng: 77.5946,
+  lat: 12.9716,
+  zoom: 13
+};
 
 export default function AudioMap() {
   const [audioFiles, setAudioFiles] = useState([]);
@@ -22,27 +20,30 @@ export default function AudioMap() {
   const [markerIcon, setMarkerIcon] = useState({ default: null, nearby: null });
   const [showUpload, setShowUpload] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isSelectingLocation, setIsSelectingLocation] = useState(false);
+  const [formData, setFormData] = useState({
+    file: null,
+    title: '',
+    range: '',
+    date: '',
+    time: '',
+    recipientUsernames: [],
+  });
+
+  const mapContainer = useRef(null);
+  const map = useRef(null);
+
+  const validAudioFiles = audioFiles.filter(
+    (file) =>
+      file?.location &&
+      Array.isArray(file.location.coordinates) &&
+      file.location.coordinates.length === 2 &&
+      typeof file.location.coordinates[0] === "number" &&
+      typeof file.location.coordinates[1] === "number"
+  );
 
   useEffect(() => {
     setMounted(true);
-    const L = require("leaflet");
-
-    const defaultIcon = L.icon({
-      iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-      shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [1, -34],
-    });
-
-    const nearbyIcon = L.icon({
-      iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [1, -34],
-    });
-
-    setMarkerIcon({ default: defaultIcon, nearby: nearbyIcon });
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -52,17 +53,113 @@ export default function AudioMap() {
             longitude: position.coords.longitude
           };
           setUserPosition(coords);
+          
+          // Initialize map with user's position
+          if (mapContainer.current && !map.current) {
+            map.current = new maplibregl.Map({
+              container: mapContainer.current,
+              style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+              center: [position.coords.longitude, position.coords.latitude],
+              zoom: 13
+            });
+
+            map.current.addControl(new maplibregl.NavigationControl());
+          }
+          
           fetchAudioFiles(coords);
         },
         (error) => {
           console.error("Geolocation error:", error);
+          // Fallback to default position if geolocation fails
+          if (mapContainer.current && !map.current) {
+            map.current = new maplibregl.Map({
+              container: mapContainer.current,
+              style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+              center: [defaultPosition.lng, defaultPosition.lat],
+              zoom: defaultPosition.zoom
+            });
+
+            map.current.addControl(new maplibregl.NavigationControl());
+          }
           fetchAudioFiles(null);
         }
       );
     } else {
+      // Fallback if geolocation is not supported
+      if (mapContainer.current && !map.current) {
+        map.current = new maplibregl.Map({
+          container: mapContainer.current,
+          style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+          center: [defaultPosition.lng, defaultPosition.lat],
+          zoom: defaultPosition.zoom
+        });
+
+        map.current.addControl(new maplibregl.NavigationControl());
+      }
       fetchAudioFiles(null);
     }
+
+    return () => map.current?.remove();
   }, []);
+
+  useEffect(() => {
+    if (!map.current) return;
+
+    // Remove existing markers
+    const markers = document.getElementsByClassName('maplibregl-marker');
+    Array.from(markers).forEach(marker => marker.remove());
+
+    // Add new markers
+    validAudioFiles.forEach((file) => {
+      const isTimeUnlocked = new Date(file.hidden_until) <= new Date();
+      const isAccessible = file.isNearby && isTimeUnlocked;
+
+      const markerElement = document.createElement('div');
+      markerElement.className = 'maplibregl-marker';
+      const markerInner = document.createElement('div');
+      markerInner.className = `marker-inner ${isAccessible ? 'accessible' : 'locked'}`;
+      markerElement.appendChild(markerInner);
+      
+      const popup = new maplibregl.Popup({ offset: 25, className: 'custom-popup' })
+        .setHTML(`
+          <div class="popup-content">
+            <b>${file.file_name}</b><br/>
+            <b>${file.title}</b><br/>
+            <span class="${isAccessible ? 'status-accessible' : file.isNearby ? 'status-nearby' : 'status-distant'}">
+              ${isAccessible ? "✅ Accessible" : file.isNearby ? "⏳ Nearby but Locked" : "📍 Not Nearby"}
+            </span><br/>
+            Range: ${file.range}m<br/>
+            Hidden Until: ${new Date(file.hidden_until).toLocaleString()}<br/>
+            Created At: ${new Date(file.created_at).toLocaleString()}<br/><br/>
+            ${isAccessible ? 
+              `<div id="audio-player-${file._id}"></div>` : 
+              '<span class="locked-text">🔒 Locked</span>'
+            }
+          </div>
+        `);
+
+      new maplibregl.Marker(markerElement)
+        .setLngLat([file.location.coordinates[0], file.location.coordinates[1]])
+        .setPopup(popup)
+        .addTo(map.current);
+    });
+  }, [validAudioFiles]);
+
+  useEffect(() => {
+    if (!map.current) return;
+
+    const handleMapClick = (e) => {
+      if (isSelectingLocation) {
+        const { lng, lat } = e.lngLat;
+        localStorage.setItem('selectedLocation', JSON.stringify({ lat, lng }));
+        setIsSelectingLocation(false);
+        setShowUpload(true);
+      }
+    };
+
+    map.current.on('click', handleMapClick);
+    return () => map.current?.off('click', handleMapClick);
+  }, [isSelectingLocation]);
 
   function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371000; // meters
@@ -106,15 +203,6 @@ export default function AudioMap() {
     }
   }
 
-  const validAudioFiles = audioFiles.filter(
-    (file) =>
-      file?.location &&
-      Array.isArray(file.location.coordinates) &&
-      file.location.coordinates.length === 2 &&
-      typeof file.location.coordinates[0] === "number" &&
-      typeof file.location.coordinates[1] === "number"
-  );
-
   const handlePlay = async (audioId) => {
     const token = localStorage.getItem("authToken");
     try {
@@ -154,22 +242,17 @@ export default function AudioMap() {
 
   const styles = {
     container: {
-      minHeight: '100vh',
+      height: '100vh',  // Changed from minHeight
       backgroundColor: '#000000',
       display: 'flex',
       flexDirection: 'column',
+      overflow: 'hidden', // Added to prevent scrolling
     },
     mapContainer: {
       flex: 1,
       position: 'relative',
       height: 'calc(100vh - 80px)',
-    },
-    mapWrapper: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
+      overflow: 'hidden', // Added to prevent scrolling
     },
     uploadButton: {
       position: 'absolute',
@@ -189,89 +272,111 @@ export default function AudioMap() {
     uploadContainer: {
       position: 'absolute',
       zIndex: 999,
-      top: '80px',
+      top: '40px', // Changed from 80px to move it higher
       left: '50%',
       transform: 'translateX(-50%)',
-      width: '90%',
-      maxWidth: '500px',
+      width: '95%',
+      maxWidth: '800px',
       backgroundColor: '#000000',
       boxShadow: '0 0 30px rgba(0, 0, 0, 0.3)',
       borderRadius: '16px',
-      overflow: 'auto',
-      maxHeight: 'calc(90% - 80px)',
+      overflowY: 'auto',
+      maxHeight: 'calc(90vh - 80px)', // Adjusted to give more space at bottom
       border: '1px solid rgba(255, 255, 255, 0.1)',
+      paddingBottom: '20px',
+    },
+    map: {
+      width: '100%',
+      height: '100%'
     }
   };
 
   return (
     <div style={styles.container}>
-      <style jsx global>{`
-        .leaflet-container {
-          width: 100%;
-          height: 100%;
-        }
-      `}</style>
       <Navbar />
       <div style={styles.mapContainer}>
-        <button onClick={() => setShowUpload((prev) => !prev)} style={styles.uploadButton}>
-          {showUpload ? "Close Upload" : "Upload Audio"}
-        </button>
-
-        {showUpload && (
-          <div style={styles.uploadContainer}>
-            <UploadAudioPage />
+        {!isSelectingLocation ? (
+          <button onClick={() => setShowUpload((prev) => !prev)} style={styles.uploadButton}>
+            {showUpload ? "Close Upload" : "Upload Audio"}
+          </button>
+        ) : (
+          <div style={{
+            position: 'absolute',
+            top: '20px',
+            left: '20px',
+            zIndex: 1000,
+            background: 'rgba(0,0,0,0.7)',
+            color: '#fff',
+            padding: '10px 20px',
+            borderRadius: '8px'
+          }}>
+            Click anywhere on the map to select a location
           </div>
         )}
 
-        <div style={styles.mapWrapper}>
-          {mounted && (
-            <MapContainer
-              center={defaultPosition}
-              zoom={13}
-              style={{ height: '100%', width: '100%' }}
-            >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; OpenStreetMap contributors'
-              />
-              {markerIcon.default &&
-                validAudioFiles.map((file, idx) => {
-                  const isTimeUnlocked = new Date(file.hidden_until) <= new Date();
-                  const isAccessible = file.isNearby && isTimeUnlocked;
+        {showUpload && !isSelectingLocation && (
+          <div style={styles.uploadContainer}>
+            <UploadAudioPage 
+              onLocationSelect={() => {
+                setShowUpload(false);
+                setIsSelectingLocation(true);
+              }}
+              formData={formData}
+              setFormData={setFormData}
+            />
+          </div>
+        )}
 
-                  return (
-                    <Marker
-                      key={`${file._id}-${idx}`}
-                      position={[file.location.coordinates[1], file.location.coordinates[0]]}
-                      icon={file.isNearby ? markerIcon.nearby : markerIcon.default}
-                    >
-                      <Popup>
-                        <b>{file.file_name}</b><br />
-                        <b>{file.title}</b><br />
-                        <span style={{ color: isAccessible ? "green" : file.isNearby ? "orange" : "blue" }}>
-                          {isAccessible
-                            ? "✅ Accessible"
-                            : file.isNearby
-                              ? "⏳ Nearby but Locked"
-                              : "📍 Not Nearby"}
-                        </span><br />
-                        Range: {file.range}m<br />
-                        Hidden Until: {new Date(file.hidden_until).toLocaleString()}<br />
-                        Created At: {new Date(file.created_at).toLocaleString()}<br /><br />
-
-                        {isAccessible ? (
-                          <AudioPlayer audioId={file._id} />
-                        ) : (
-                          <span style={{ color: "#888" }}>🔒 Locked</span>
-                        )}
-                      </Popup>
-                    </Marker>
-                  );
-                })}
-            </MapContainer>
-          )}
-        </div>
+        <div ref={mapContainer} style={styles.mapWrapper} />
       </div>
+
+      <style jsx global>{`
+        .maplibregl-marker {
+          cursor: pointer;
+        }
+        .marker-inner {
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          background: #ff4b4b;
+          border: 2px solid #fff;
+          transition: all 0.2s;
+        }
+        .marker-inner.accessible {
+          background: #00ff9d;
+        }
+        .custom-popup .maplibregl-popup-content {
+          background: #000;
+          color: white;
+          padding: 12px;
+          border-radius: 8px;
+        }
+        .popup-content {
+          min-width: 200px;
+        }
+        .status-accessible { color: #00ff9d; }
+        .status-nearby { color: orange; }
+        .status-distant { color: blue; }
+        .locked-text { color: #888; }
+        body {
+          overflow: hidden;
+          margin: 0;
+          padding: 0;
+        }
+        .maplibregl-map {
+          height: 100%;
+          width: 100%;
+        }
+
+        /* Single scrollbar style */
+        * {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+        *::-webkit-scrollbar {
+          display: none;
+        }
+      `}</style>
     </div>
   );
 }
