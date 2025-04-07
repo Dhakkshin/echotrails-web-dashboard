@@ -1,181 +1,429 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { User, Users } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import axios from 'axios';
+import { Users, UserPlus, Clock, XCircle, Search, Check, X } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 
-export default function UserProfile() {
-  const [userData, setUserData] = useState(null);
-  const [following, setFollowing] = useState([]);
+export default function ProfilePage() {
+  const [profile, setProfile] = useState({
+    username: '',
+    followers: [],
+    following: []
+  });
+  const [activeTab, setActiveTab] = useState('following');
   const [loading, setLoading] = useState(true);
-  const [loadingLists, setLoadingLists] = useState(true);
-  const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+  const [allUsers, setAllUsers] = useState([]);
+  const [showUserSearch, setShowUserSearch] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [showPendingRequests, setShowPendingRequests] = useState(false);
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (!token) return;
+    fetchProfileData();
+    fetchPendingRequests();
+  }, []);
 
-      try {
-        const res = await fetch('https://echo-trails-backend.vercel.app/users/identify', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+  const fetchProfileData = async () => {
+    const token = localStorage.getItem('authToken');
+    const username = localStorage.getItem('username');
 
-        const data = await res.json();
-
-        if (data.status === 'success') {
-          setUserData(data.user_data);
-          fetchFollowingAndFollowers(data.user_data.id);
-        } else {
-          console.error('❌ Failed to fetch user data:', data);
-        }
-      } catch (err) {
-        console.error('❌ Error fetching user profile:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const fetchFollowingAndFollowers = async (userId) => {
-      try {
-        setLoadingLists(true);
-    
-        const followingRes = await fetch(`https://echo-trails-backend.vercel.app/users/following`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-    
-        const followingData = await followingRes.json();
-    
-        console.log('✅ Following Response:', followingData);
-        console.log('🔍 Following Users:', followingData.users);
-    
-        setFollowing(followingData || []);
-      } catch (err) {
-        console.error('❌ Error fetching following:', err);
-      } finally {
-        setLoadingLists(false);
-      }
-    };
-
-    fetchUserData();
-  }, [token]);
-
-  const handleUnfollow = async (userId) => {
     try {
-      const res = await fetch(`https://echo-trails-backend.vercel.app/users/unfollow`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId }),
+      const [followersRes, followingRes] = await Promise.all([
+        axios.get('https://echo-trails-backend.vercel.app/users/followers', {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        axios.get('https://echo-trails-backend.vercel.app/users/following', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ]);
+
+      setProfile({
+        username: username,
+        followers: followersRes.data,
+        following: followingRes.data
       });
-
-      const data = await res.json();
-
-      if (data.status === 'success') {
-        setFollowing((prevFollowing) => prevFollowing.filter((user) => user.id !== userId));
-      } else {
-        console.error('❌ Failed to unfollow user:', data);
-      }
-    } catch (err) {
-      console.error('❌ Error unfollowing user:', err);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching profile data:', error);
+      setLoading(false);
     }
   };
 
-  if (loading) return (
-    <>
-      <Navbar />
-      <div style={{ minHeight: 'calc(100vh - 64px)', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000000' }}>
-        <div style={{ color: '#00ff9d' }}>Loading profile...</div>
-      </div>
-    </>
-  );
+  const fetchPendingRequests = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await axios.get(
+        'https://echo-trails-backend.vercel.app/users/follow/requests/pending',
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      setPendingRequests(response.data);
+    } catch (error) {
+      console.error('Error fetching pending requests:', error);
+    }
+  };
 
-  if (!userData) return (
-    <>
-      <Navbar />
-      <div style={{ minHeight: 'calc(100vh - 64px)', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000000' }}>
-        <div style={{ color: '#ff4d4d' }}>Failed to load profile.</div>
-      </div>
-    </>
+  const handleUnfollow = async (username) => {
+    try {
+      const token = localStorage.getItem('authToken');
+      await axios.post(
+        `https://echo-trails-backend.vercel.app/users/unfollow/${username}`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      // Update the following list
+      setProfile(prev => ({
+        ...prev,
+        following: prev.following.filter(user => user.username !== username)
+      }));
+    } catch (error) {
+      console.error('Error unfollowing user:', error);
+    }
+  };
+
+  const handleRemoveFollower = async (username) => {
+    try {
+      const token = localStorage.getItem('authToken');
+      await axios.post(
+        // Changed endpoint path to match backend route
+        `https://echo-trails-backend.vercel.app/users/followers/remove/${username}`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      // Update the followers list
+      setProfile(prev => ({
+        ...prev,
+        followers: prev.followers.filter(user => user.username !== username)
+      }));
+    } catch (error) {
+      console.error('Error removing follower:', error);
+    }
+  };
+
+  const fetchAllUsers = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await axios.get('https://echo-trails-backend.vercel.app/users/all', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAllUsers(response.data);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+    }
+  };
+
+  const handleFollowRequest = async (username) => {
+    try {
+      setIsLoading(true);
+      const token = localStorage.getItem('authToken');
+      await axios.post(
+        `https://echo-trails-backend.vercel.app/users/follow/request/${username}`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      // Update UI to show request sent
+      setAllUsers(prev => 
+        prev.map(user => 
+          user.username === username 
+            ? { ...user, requestSent: true }
+            : user
+        )
+      );
+    } catch (error) {
+      console.error('Error sending follow request:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAcceptRequest = async (requesterId) => {
+    try {
+      const token = localStorage.getItem('authToken');
+      await axios.post(
+        `https://echo-trails-backend.vercel.app/users/follow/accept/${requesterId}`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      
+      // Update local state
+      setPendingRequests(prev => prev.filter(req => req.id !== requesterId));
+      // Refresh followers list
+      fetchProfileData();
+    } catch (error) {
+      console.error('Error accepting request:', error);
+    }
+  };
+
+  const filteredUsers = allUsers.filter(user => 
+    user.username.toLowerCase().includes(searchTerm.toLowerCase()) &&
+    user.username !== profile.username &&
+    !profile.following.some(f => f.username === user.username)
   );
 
   const styles = {
     container: {
-      minHeight: 'calc(100vh - 64px)',
+      minHeight: '100vh',
       backgroundColor: '#000000',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
+      color: '#ffffff',
       padding: '40px 20px',
     },
-    card: {
-      maxWidth: '480px',
-      width: '100%',
-      padding: '60px',
-      borderRadius: '24px',
-      boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-      backgroundColor: '#000000',
-      border: '1px solid rgba(255, 255, 255, 0.1)',
+    content: {
+      maxWidth: '800px',
+      margin: '0 auto',
     },
-    header: {
-      display: 'flex',
-      alignItems: 'center',
-      marginBottom: '40px',
+    profileHeader: {
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      borderRadius: '16px',
+      padding: '32px',
+      marginBottom: '24px',
+      borderWidth: '1px',
+      borderStyle: 'solid',
+      borderColor: 'rgba(255, 255, 255, 0.1)',
     },
-    title: {
-      color: '#ffffff',
-      fontSize: '32px',
-      fontWeight: '700',
-      marginLeft: '12px',
-    },
-    section: {
-      marginBottom: '32px',
-    },
-    label: {
-      fontSize: '16px',
-      fontWeight: '500',
+    username: {
+      fontSize: '24px',
+      fontWeight: '600',
       color: '#00ff9d',
       marginBottom: '8px',
     },
-    value: {
-      fontSize: '18px',
-      color: '#ffffff',
-      fontWeight: '400',
-    },
-    listContainer: {
+    stats: {
+      display: 'flex',
+      gap: '24px',
       marginTop: '16px',
-      maxHeight: '200px',
-      overflowY: 'auto',
-      padding: '8px',
+    },
+    stat: {
+      textAlign: 'center',
+    },
+    statNumber: {
+      fontSize: '20px',
+      fontWeight: '600',
+      color: '#00ff9d',
+    },
+    statLabel: {
+      fontSize: '14px',
+      color: '#888',
+    },
+    tabs: {
+      display: 'flex',
+      gap: '12px',
+      marginBottom: '24px',
+    },
+    tab: {
+      padding: '12px 24px',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      borderWidth: '1px',
+      borderStyle: 'solid',
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    activeTab: {
+      backgroundColor: 'rgba(0, 255, 157, 0.1)',
+      borderWidth: '1px',
+      borderStyle: 'solid',
+      borderColor: '#00ff9d',
+      color: '#00ff9d',
+    },
+    userList: {
+      display: 'grid',
+      gap: '12px',
+    },
+    userCard: {
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      borderRadius: '12px',
+      padding: '16px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderWidth: '1px',
+      borderStyle: 'solid',
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    userInfo: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+    },
+    avatar: {
+      width: '40px',
+      height: '40px',
+      borderRadius: '50%',
+      backgroundColor: '#00ff9d',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: '#000',
+      fontWeight: '600',
+    },
+    actionLinks: {
+      display: 'flex',
+      gap: '12px',
+      marginTop: '24px',
+    },
+    actionLink: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '12px 20px',
       backgroundColor: 'rgba(255, 255, 255, 0.05)',
       borderRadius: '8px',
+      borderWidth: '1px',
+      borderStyle: 'solid',
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+      color: '#fff',
+      textDecoration: 'none',
+      transition: 'all 0.2s ease',
     },
-    listItem: {
+    removeButton: {
+      backgroundColor: 'rgba(255, 77, 77, 0.1)',
+      border: 'none',
+      padding: '8px',
+      borderRadius: '50%',
+      cursor: 'pointer',
+      color: '#ff4d4d',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.2s ease',
+      '&:hover': {
+        backgroundColor: 'rgba(255, 77, 77, 0.2)',
+      }
+    },
+    searchOverlay: {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      zIndex: 1000,
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    searchContainer: {
+      width: '90%',
+      maxWidth: '500px',
+      backgroundColor: '#111111',
+      borderRadius: '16px',
+      padding: '24px',
+      border: '1px solid rgba(255, 255, 255, 0.1)',
+    },
+    searchHeader: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      padding: '8px 12px',
-      borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+      marginBottom: '20px',
     },
-    listItemText: {
+    searchInput: {
+      width: '100%',
+      padding: '12px 16px',
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      border: '1px solid rgba(255, 255, 255, 0.1)',
+      borderRadius: '8px',
       color: '#ffffff',
+      fontSize: '16px',
+      marginBottom: '16px',
+    },
+    userItem: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '12px',
+      borderRadius: '8px',
+      marginBottom: '8px',
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    followButton: {
+      padding: '8px 16px',
+      backgroundColor: '#00ff9d',
+      color: '#000000',
+      border: 'none',
+      borderRadius: '6px',
+      cursor: 'pointer',
       fontSize: '14px',
+      fontWeight: '600',
     },
-    loadingText: {
+    followButtonSent: {
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
       color: '#00ff9d',
-      textAlign: 'center',
-      padding: '16px',
     },
-    emptyText: {
-      color: '#ffffff',
-      textAlign: 'center',
+    modalOverlay: {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      zIndex: 1000,
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalContent: {
+      width: '90%',
+      maxWidth: '500px',
+      backgroundColor: '#111111',
+      borderRadius: '16px',
+      padding: '24px',
+      border: '1px solid rgba(255, 255, 255, 0.1)',
+    },
+    modalHeader: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '20px',
+      color: '#00ff9d',
+      fontSize: '20px',
+      fontWeight: '600',
+    },
+    requestCard: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
       padding: '16px',
-      opacity: 0.7,
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      borderRadius: '8px',
+      marginBottom: '12px',
+    },
+    requestActions: {
+      display: 'flex',
+      gap: '8px',
+    },
+    acceptButton: {
+      padding: '8px',
+      borderRadius: '50%',
+      backgroundColor: 'rgba(0, 255, 157, 0.1)',
+      border: 'none',
+      color: '#00ff9d',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    rejectButton: {
+      padding: '8px',
+      borderRadius: '50%',
+      backgroundColor: 'rgba(255, 77, 77, 0.1)',
+      border: 'none',
+      color: '#ff4d4d',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
   };
 
@@ -183,61 +431,222 @@ export default function UserProfile() {
     <>
       <Navbar />
       <div style={styles.container}>
-        <div style={styles.card}>
-          <div style={styles.header}>
-            <User size={32} style={{ color: '#00ff9d' }} />
-            <h1 style={styles.title}>Your Profile</h1>
-          </div>
-
-          <div style={styles.section}>
-            <p style={styles.label}>Username</p>
-            <p style={styles.value}>{userData.username}</p>
-          </div>
-
-          <div style={styles.section}>
-            <p style={styles.label}>Email</p>
-            <p style={styles.value}>{userData.email}</p>
-          </div>
-
-          <div style={styles.section}>
-            <p style={styles.label}>Account Created</p>
-            <p style={styles.value}>{new Date(userData.created_at).toLocaleString()}</p>
-          </div>
-
-          <div style={styles.section}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-              <Users size={20} style={{ color: '#00ff9d', marginRight: '8px' }} />
-              <p style={styles.label}>Following ({following.length})</p>
+        <div style={styles.content}>
+          <div style={styles.profileHeader}>
+            <h1 style={styles.username}>{profile.username}</h1>
+            <div style={styles.stats}>
+              <div style={styles.stat}>
+                <div style={styles.statNumber}>{profile.following.length}</div>
+                <div style={styles.statLabel}>Following</div>
+              </div>
+              <div style={styles.stat}>
+                <div style={styles.statNumber}>{profile.followers.length}</div>
+                <div style={styles.statLabel}>Followers</div>
+              </div>
             </div>
-            <div style={styles.listContainer}>
-              {loadingLists ? (
-                <div style={styles.loadingText}>Loading...</div>
-              ) : following.length === 0 ? (
-                <div style={styles.emptyText}>You are not following anyone yet.</div>
-              ) : (
-                following.map((user) => (
-                  <div key={user.id} style={styles.listItem}>
-                    <span style={styles.listItemText}>{user.username}</span>
-                    <button 
-                      style={{
-                        backgroundColor: '#ff4d4d',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        padding: '4px 8px',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => handleUnfollow(user.id)}
-                    >
-                      Remove
-                    </button>
+            <div style={styles.actionLinks}>
+              <button
+                onClick={() => {
+                  setShowUserSearch(true);
+                  fetchAllUsers();
+                }}
+                style={styles.actionLink}
+              >
+                <UserPlus size={18} />
+                Find People
+              </button>
+              <button 
+                onClick={() => setShowPendingRequests(true)} 
+                style={{
+                  ...styles.actionLink,
+                  position: 'relative',
+                }}
+              >
+                <Clock size={18} />
+                Pending Requests
+                {pendingRequests.length > 0 && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-8px',
+                    right: '-8px',
+                    backgroundColor: '#00ff9d',
+                    color: '#000',
+                    borderRadius: '50%',
+                    width: '20px',
+                    height: '20px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    {pendingRequests.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div style={styles.tabs}>
+            <div 
+              style={{
+                ...styles.tab,
+                ...(activeTab === 'following' ? styles.activeTab : {})
+              }}
+              onClick={() => setActiveTab('following')}
+            >
+              Following
+            </div>
+            <div 
+              style={{
+                ...styles.tab,
+                ...(activeTab === 'followers' ? styles.activeTab : {})
+              }}
+              onClick={() => setActiveTab('followers')}
+            >
+              Followers
+            </div>
+          </div>
+
+          <div style={styles.userList}>
+            {activeTab === 'following' ? (
+              profile.following.map((user, index) => (
+                <div key={user._id || `following-${index}`} style={styles.userCard}>
+                  <div style={styles.userInfo}>
+                    <div style={styles.avatar}>
+                      {user.username?.charAt(0).toUpperCase()}
+                    </div>
+                    <div>{user.username}</div>
                   </div>
-                ))
-              )}
-            </div>
+                  <button
+                    onClick={() => handleUnfollow(user.username)}
+                    style={styles.removeButton}
+                    title="Unfollow"
+                  >
+                    <XCircle size={18} />
+                  </button>
+                </div>
+              ))
+            ) : (
+              profile.followers.map((user, index) => (
+                <div key={user._id || `follower-${index}`} style={styles.userCard}>
+                  <div style={styles.userInfo}>
+                    <div style={styles.avatar}>
+                      {user.username?.charAt(0).toUpperCase()}
+                    </div>
+                    <div>{user.username}</div>
+                  </div>
+                  <button
+                    onClick={() => handleRemoveFollower(user.username)}
+                    style={styles.removeButton}
+                    title="Remove follower"
+                  >
+                    <XCircle size={18} />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
+
+      {showUserSearch && (
+        <div style={styles.searchOverlay} onClick={() => setShowUserSearch(false)}>
+          <div style={styles.searchContainer} onClick={e => e.stopPropagation()}>
+            <div style={styles.searchHeader}>
+              <h3 style={{ color: '#00ff9d', margin: 0 }}>Find People</h3>
+              <button
+                onClick={() => setShowUserSearch(false)}
+                style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="Search users..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={styles.searchInput}
+              />
+              <Search 
+                size={20} 
+                style={{ 
+                  position: 'absolute', 
+                  right: '12px', 
+                  top: '50%', 
+                  transform: 'translateY(-50%)',
+                  color: '#666'
+                }} 
+              />
+            </div>
+
+            <div style={styles.userList}>
+              {filteredUsers.map(user => (
+                <div key={user.id} style={styles.userItem}>
+                  <span style={{ color: '#fff' }}>{user.username}</span>
+                  <button
+                    onClick={() => handleFollowRequest(user.username)}
+                    disabled={user.requestSent || isLoading}
+                    style={{
+                      ...styles.followButton,
+                      ...(user.requestSent ? styles.followButtonSent : {})
+                    }}
+                  >
+                    {user.requestSent ? 'Request Sent' : 'Follow'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Requests Modal */}
+      {showPendingRequests && (
+        <div style={styles.modalOverlay} onClick={() => setShowPendingRequests(false)}>
+          <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <span>Pending Follow Requests</span>
+              <button
+                onClick={() => setShowPendingRequests(false)}
+                style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            {pendingRequests.length === 0 ? (
+              <div style={{ color: '#666', textAlign: 'center', padding: '20px' }}>
+                No pending requests
+              </div>
+            ) : (
+              pendingRequests.map(request => (
+                <div key={request.id} style={styles.requestCard}>
+                  <div style={{ color: '#fff' }}>{request.username}</div>
+                  <div style={styles.requestActions}>
+                    <button
+                      onClick={() => handleAcceptRequest(request.id)}
+                      style={styles.acceptButton}
+                      title="Accept"
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button
+                      onClick={() => {/* Implement reject handler */}}
+                      style={styles.rejectButton}
+                      title="Reject"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

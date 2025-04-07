@@ -96,6 +96,39 @@ export default function HomePage() {
         featureText: {
             color: '#bbbbbb',
         },
+        downloadSection: {
+            textAlign: 'center',
+            marginTop: '48px',
+            padding: '32px',
+            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            borderRadius: '24px',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+        },
+        downloadTitle: {
+            fontSize: '24px',
+            fontWeight: '600',
+            color: '#00ff9d',
+            marginBottom: '16px',
+        },
+        downloadLink: {
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '16px 32px',
+            backgroundColor: '#00ff9d',
+            color: '#000000',
+            fontSize: '18px',
+            fontWeight: '600',
+            borderRadius: '14px',
+            textDecoration: 'none',
+            marginTop: '16px',
+            boxShadow: '0 0 20px rgba(0, 255, 157, 0.3)',
+        },
+        downloadText: {
+            color: '#a0a0a0',
+            fontSize: '16px',
+            marginBottom: '24px',
+        },
     };
 
     return (
@@ -138,6 +171,22 @@ export default function HomePage() {
                         Unlock audio when visiting the right spot.
                     </p>
                 </div>
+            </div>
+
+            <div style={styles.downloadSection}>
+                <h2 style={styles.downloadTitle}>Get the Mobile App</h2>
+                <p style={styles.downloadText}>
+                    Experience EchoTrails on the go with our mobile app.
+                    Available for Android. (iOS users, you aint getting it😏)
+                </p>
+                <a 
+                    href="https://expo.dev/accounts/pream14/projects/bolt-expo-nativewind/builds/e0130004-b50f-46c2-9639-9e7a7cd7677a"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={styles.downloadLink}
+                >
+                    📱 Download Mobile App
+                </a>
             </div>
         </div>
     );
